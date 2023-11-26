@@ -1,98 +1,100 @@
 "use client";
+import { marketAddress } from "@/config";
+import BeatMarket from "../../backend/artifacts/backend/contracts/BeatMarket.sol/BeatMarket.json";
+import NftCard from "@/app/src/components/NftCard";
+import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import axios from "axios";
-import Web3Modal from "web3modal";
-import { nftAddress, marketAddress } from "../../config";
-import NFT from "../../artifacts/contracts/NFT.sol/NFT.json";
-import Market from "../../artifacts/contracts/BeatMarket.sol/BeatMarket.json";
-import { useEffect, useState } from "react";
-import {
-  Button,
-  Card,
-  CardBody,
-  CardFooter,
-  CardHeader,
-  Image,
-} from "@nextui-org/react";
+import { useAddress, useSigner } from "@thirdweb-dev/react";
+import { Spinner } from "@nextui-org/react";
+import { FaEthereum } from "react-icons/fa";
 
 export default function Explore() {
-  const [nfts, setNfts] = useState([]);
-  const [loadingState, setLoadingState] = useState("not-loaded");
-
+  const signer = useSigner();
+  const address = useAddress();
+  const [activeListings, setActiveListings] = useState([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    loadNTFlist();
+    fetchActiveListings().then(() => setLoading(false));
   }, []);
 
-  async function loadNTFlist() {
-    const provider = new ethers.JsonRpcProvider();
-    const tokenContract = new ethers.Contract(nftAddress, NFT.abi, provider);
+  async function fetchActiveListings() {
+    const provider = new ethers.providers.JsonRpcProvider();
     const marketContract = new ethers.Contract(
       marketAddress,
-      Market.abi,
+      BeatMarket.abi,
       provider
     );
-    const data = await marketContract.fetchMarketItems();
-    const items = await Promise.all(
-      data.map(async (i) => {
-        const itemUri = await tokenContract.tokenURI(i.tokenId);
-        const metadata = await axios.get(itemUri);
-
-        return {
-          price: ethers.formatEther(i.price.toString()),
-          tokenId: i.tokenId.toNumber(),
-          seller: i.seller,
-          owner: i.owner,
-          image: metadata.data.image,
+    const data = await marketContract.getActiveListings();
+    const listings = await Promise.all(
+      data.map(async (listing) => {
+        const tokenUri = await marketContract.tokenURI(listing.tokenId);
+        const metadata = await axios.get(tokenUri);
+        let price = ethers.utils.formatUnits(listing.price.toString(), "ether");
+        let item = {
+          price,
+          tokenId: listing.tokenId.toNumber(),
+          seller: listing.seller,
           name: metadata.data.name,
+          audio: metadata.data.audio,
+          description: metadata.data.description,
         };
+        return item;
       })
     );
-    setNfts(items);
-    setLoadingState("loaded");
+    setActiveListings(listings);
   }
 
-  async function buyNFT(item) {
-    const web3modal = new Web3Modal();
-    const connection = await web3modal.connect();
-    const provider = new ethers.BrowserProvider(connection);
-
-    const signer = provider.getSigner();
-    const contract = new ethers.Contract(marketAddress, Market.abi, signer);
-    const price = ethers.parseEther(item.price.toString());
-
-    const transaction = contract.createMarketSale(nftAddress, item.tokenId, {
-      value: price,
-    });
-
-    await transaction.wait();
-    loadNTFlist();
+  async function buy(nft) {
+    const marketContract = new ethers.Contract(
+      marketAddress,
+      BeatMarket.abi,
+      signer
+    );
+    const price = ethers.utils.parseUnits(nft.price.toString(), "ether");
+    await (
+      await marketContract.purchaseItem(nft.tokenId, {
+        value: price,
+        gasLimit: 300000,
+      })
+    )
+      .wait()
+      .then(() => fetchActiveListings());
   }
 
-  if (loadingState === "loaded" && !nfts.length)
-    return <h1 className="px-20 py-10 text-3xl">No items in marketplace</h1>;
+  function getPriceWithLogo(price) {
+    return (
+      <>
+        {price} <FaEthereum />
+      </>
+    );
+  }
 
+  if (loading)
+    return (
+      <Spinner
+        color="secondary"
+        size="lg"
+        className="absolute top-1/2 right-1/2"
+      />
+    );
   return (
-    <div className="container flex justify-center">
-      <div className="grid grid-cols-3 gap-6">
-        {nfts.map((nft, i) => (
-          <Card key={i} shadow>
-            <CardHeader>{nft.name}</CardHeader>
-            <CardBody>
-              <Image src={nft.image} alt="nft image" />
-              <p>{nft.description}</p>
-            </CardBody>
-            <CardFooter>
-              <div className="flex justify-between">
-                <p>{nft.price} Matic</p>
-                <Button variant="primary" onClick={() => buyNFT(nft)}>
-                  Buy
-                </Button>
-              </div>
-              ;
-            </CardFooter>
-          </Card>
-        ))}
-      </div>
-    </div>
+    <section className="flex justify-center pt-12 container mx-auto flex-col gap-4 px-8">
+      <h1 className="font-bold text-2xl">Explore</h1>
+
+      {!activeListings.length ? (
+        <h1>No active listings</h1>
+      ) : (
+        activeListings.map((nft) => (
+          <NftCard
+            key={nft.tokenId}
+            nft={nft}
+            buttonText={getPriceWithLogo(nft.price)}
+            actionDisabled={nft.seller === address}
+            onPressFunction={buy}
+          ></NftCard>
+        ))
+      )}
+    </section>
   );
 }

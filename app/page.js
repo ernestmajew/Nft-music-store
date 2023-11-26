@@ -1,7 +1,11 @@
 "use client";
 
-import HeroSection from "./HeroSection";
+import HeroSection from "./splash/HeroSection";
 
 export default function Home() {
-  return <HeroSection></HeroSection>;
+  return (
+    <>
+      <HeroSection></HeroSection>
+    </>
+  );
 }
