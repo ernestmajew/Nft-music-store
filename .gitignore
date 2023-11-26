@@ -47,3 +47,7 @@ artifacts
 
 # Notes
 TECH.txt
+
+.idea
+hardhat.config.js
+apiConfig.js
